@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Brevis Sling — Mini Game</title>
+  <style>
+    :root{--bg:#071022;--accent:#00d1a8;--muted:#1b2a3a;--card:#0f1720}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,Arial}
+    .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;background:linear-gradient(180deg,var(--bg),#051024);min-height:100vh;color:#cfeff3}
+    header{display:flex;align-items:center;gap:12px}
+    header h1{margin:0;font-size:20px}
+    #game{background:var(--card);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.6);}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:var(--accent);border:0;padding:8px 12px;border-radius:8px;color:#012;cursor:pointer}
+    p.instructions{max-width:900px;margin:6px 0 0 0;color:#9fded0}
+    footer{font-size:12px;color:#7fbfb0;margin-top:6px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <svg width="40" height="40" viewBox="0 0 64 64" aria-hidden>
+        <circle cx="32" cy="32" r="30" fill="#071022" stroke="#00d1a8" stroke-width="2" />
+        <text x="32" y="37" font-family="monospace" font-size="10" fill="#00d1a8" text-anchor="middle">BREVIS</text>
+      </svg>
+      <h1>Brevis Sling — a Brevis-themed Angry Birds mini-game</h1>
+    </header>
+
+    <div id="game">
+      <canvas id="canvas" width="900" height="480"></canvas>
+    </div>
+
+    <div class="controls">
+      <button id="resetBtn">Reset</button>
+      <div style="color:#9fded0">Drag the BREVIS orb, pull and release to launch. Knock over the data-blocks!</div>
+    </div>
+
+    <p class="instructions">This mini-game is styled for Brevis (a ZK omnichain data-attestation platform) — project blocks represent data attestation nodes and the orb is a Brevis proof token. See source for embedding on your page.</p>
+
+    <footer>Tip: Press space to spawn a new orb after launching. Built to drop into an index.html on your site.</footer>
+  </div>
+
+<script>
+// Simple slingshot physics (no external libraries) -------------------------------------------------
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W = canvas.width, H = canvas.height;
+
+// World settings
+const gravity = 0.6;
+const friction = 0.998;
+
+// Game objects
+let orb = null;
+let blocks = [];
+let groundY = H - 40;
+let mouse = {x:0,y:0,down:false};
+let slingPos = {x:150,y:groundY - 40};
+let launched = false;
+
+function reset(){
+  blocks = [];
+  // create a Brevis-themed tower of blocks
+  const cols = 5, rows = 4;
+  const bw = 50, bh = 30; 
+  const startX = 520, startY = groundY - bh;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      blocks.push({x:startX + c*bw, y:startY - r*bh, w:bw-4, h:bh-4, vx:0, vy:0, hp:20});
+    }
+  }
+  spawnOrb();
+}
+
+function spawnOrb(){
+  orb = {x: slingPos.x, y: slingPos.y, r:20, vx:0, vy:0, stuck:true};
+  launched = false;
+}
+
+function update(){
+  // orb behavior
+  if(orb){
+    if(orb.stuck){
+      if(mouse.down){ orb.x = mouse.x; orb.y = mouse.y; }
+    } else {
+      orb.vy += gravity;
+      orb.vx *= friction;
+      orb.x += orb.vx; orb.y += orb.vy;
+      // ground collision
+      if(orb.y + orb.r > groundY){ orb.y = groundY - orb.r; orb.vy *= -0.4; orb.vx *= 0.7; }
+      // out of bounds
+      if(orb.x > W + 200 || orb.x < -200) orb = null;
+    }
+  }
+
+  // blocks physics simple
+  for(let b of blocks){
+    b.vy += gravity*0.4;
+    b.x += b.vx; b.y += b.vy;
+    // ground
+    if(b.y + b.h > groundY){ b.y = groundY - b.h; b.vy *= -0.25; b.vx *= 0.7; }
+    // tiny damping
+    b.vx *= 0.995; b.vy *= 0.995;
+  }
+
+  // collision orb <-> blocks
+  if(orb){
+    for(let b of blocks){
+      if(circleRectCollision(orb,b)){
+        // simple impulse
+        const nx = (b.x + b.w/2) - orb.x;
+        const ny = (b.y + b.h/2) - orb.y;
+        const len = Math.max(0.1, Math.hypot(nx,ny));
+        const ux = nx/len, uy = ny/len;
+        const impact = Math.min(18, Math.hypot(orb.vx,orb.vy));
+        b.vx += -ux*impact*0.6; b.vy += -uy*impact*0.6;
+        orb.vx += ux*impact*0.2; orb.vy += uy*impact*0.2;
+        b.hp -= Math.round(impact*1.5);
+      }
+    }
+  }
+
+  // remove destroyed blocks
+  blocks = blocks.filter(b=>b.hp>0);
+}
+
+function circleRectCollision(c, r){
+  const nearestX = Math.max(r.x, Math.min(c.x, r.x + r.w));
+  const nearestY = Math.max(r.y, Math.min(c.y, r.y + r.h));
+  const dx = c.x - nearestX, dy = c.y - nearestY;
+  return (dx*dx + dy*dy) < (c.r*c.r);
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  // sky
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#071022'); grad.addColorStop(1,'#04202a');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,W,H);
+
+  // ground
+  ctx.fillStyle = '#071826'; ctx.fillRect(0,groundY,W,H-groundY);
+  ctx.fillStyle = '#0b2b2b'; ctx.fillRect(0,groundY+6,W,6);
+
+  // sling
+  ctx.beginPath(); ctx.arc(slingPos.x, slingPos.y, 6,0,Math.PI*2); ctx.fillStyle='#00d1a8'; ctx.fill();
+  if(orb && orb.stuck){
+    ctx.beginPath(); ctx.moveTo(slingPos.x, slingPos.y); ctx.lineTo(orb.x, orb.y); ctx.strokeStyle='rgba(0,209,168,0.6)'; ctx.lineWidth=6; ctx.stroke();
+  }
+
+  // blocks
+  for(let b of blocks){
+    ctx.fillStyle = '#0f5160'; ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.fillStyle = '#cfeff3'; ctx.font = '12px monospace'; ctx.fillText('DATA', b.x + 8, b.y + b.h/2 + 4);
+  }
+
+  // orb
+  if(orb){
+    ctx.beginPath(); ctx.arc(orb.x, orb.y, orb.r, 0, Math.PI*2);
+    ctx.fillStyle='#00d1a8'; ctx.fill();
+    ctx.fillStyle='#012'; ctx.font='bold 12px monospace'; ctx.textAlign='center'; ctx.fillText('BREVIS', orb.x, orb.y+4);
+  }
+
+  // HUD
+  ctx.fillStyle='#9fded0'; ctx.font='14px sans-serif';
+  ctx.fillText('Blocks: ' + blocks.length, 20, 28);
+}
+
+function loop(){ update(); draw(); requestAnimationFrame(loop); }
+
+// mouse handling
+canvas.addEventListener('pointerdown',(e)=>{
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top; mouse.down = true;
+  if(orb && Math.hypot(mouse.x-orb.x, mouse.y-orb.y) < orb.r+10){ orb.stuck = true; }
+});
+canvas.addEventListener('pointermove',(e)=>{
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top;
+});
+canvas.addEventListener('pointerup',(e)=>{
+  mouse.down = false;
+  if(orb && orb.stuck){
+    // compute launch vector from sling center to orb
+    const dx = slingPos.x - orb.x; const dy = slingPos.y - orb.y;
+    orb.vx = dx * 0.25; orb.vy = dy * 0.25;
+    orb.stuck = false; launched = true;
+  }
+});
+
+// keyboard to spawn new orb
+window.addEventListener('keydown', (e)=>{
+  if(e.code === 'Space') spawnOrb();
+});
+
+document.getElementById('resetBtn').addEventListener('click', reset);
+
+// responsive canvas
+function fitCanvas(){
+  const wrapper = canvas.parentElement;
+  const maxW = Math.min(window.innerWidth - 40, 1000);
+  canvas.width = Math.max(700, Math.round(maxW));
+  canvas.height = Math.round(canvas.width * 480/900);
+  W = canvas.width; H = canvas.height; groundY = H - 40; slingPos = {x: Math.round(canvas.width*0.166), y: groundY - 40};
+}
+window.addEventListener('resize', ()=>{ fitCanvas(); draw(); });
+
+// init
+fitCanvas(); reset(); loop();
+</script>
+</body>
+</html>
